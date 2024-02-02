@@ -110,6 +110,41 @@ const cellShaderModule = device.createShaderModule({
       }
     `
   });
+
+  const lineIndices = new Uint32Array([
+    // Each pair of vertices forms an edge
+    0, 1, 1, 2, 2, 3, 3, 0, // Front face
+    4, 5, 5, 6, 6, 7, 7, 4, // Back face
+    0, 4, 1, 5, 2, 6, 3, 7, // Connecting edges
+]);
+
+const lineIndexBuffer = device.createBuffer({
+    label: "Cube line indices",
+    size: lineIndices.byteLength,
+    usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
+});
+device.queue.writeBuffer(lineIndexBuffer, 0, lineIndices);
+
+
+  const lineShaderModule = device.createShaderModule({
+    label: "Line shader",
+    code: `
+      struct Uniforms {
+        mvpMatrix : mat4x4<f32>,
+      };
+      @group(0) @binding(0) var<uniform> uniforms : Uniforms;
+  
+      @vertex
+      fn vertexMain(@location(0) position: vec3<f32>) -> @builtin(position) vec4<f32> {
+        return uniforms.mvpMatrix * vec4<f32>(position, 1.0);
+      }
+  
+      @fragment
+      fn fragmentMain() -> @location(0) vec4<f32> {
+        return vec4<f32>(1.0, 1.0, 1.0, 1.0); // Output white color
+      }
+    `
+  });
   
   // You'll also need to create a uniform buffer for the MVP matrix and update it on each frame
   let mvpMatrix = createPerspectiveMatrix(); // Initially, just the perspective matrix
@@ -168,6 +203,34 @@ const cellShaderModule = device.createShaderModule({
       format: 'depth24plus-stencil8',
     },
   });
+
+  const linePipeline = device.createRenderPipeline({
+    label: "Line pipeline",
+    layout: device.createPipelineLayout({ bindGroupLayouts: [uniformBindGroupLayout] }),
+    vertex: {
+      module: lineShaderModule,
+      entryPoint: "vertexMain",
+      buffers: [vertexBufferLayout],
+    },
+    fragment: {
+      module: lineShaderModule,
+      entryPoint: "fragmentMain",
+      targets: [{
+        format: canvasFormat,
+      }],
+    },
+    primitive: {
+      topology: 'line-list',
+      cullMode: 'none',
+    },
+    // Add this depth-stencil configuration to match the render pass expectation
+    depthStencil: {
+      depthWriteEnabled: true,
+      depthCompare: 'less',
+      format: 'depth24plus-stencil8',
+    },
+  });
+  
   
 // Create a depth-stencil texture
 const depthStencilTexture = device.createTexture({
@@ -215,6 +278,11 @@ const depthStencilTexture = device.createTexture({
     pass.setVertexBuffer(0, vertexBuffer);
     pass.setIndexBuffer(indexBuffer, 'uint32');
     pass.drawIndexed(indices.length);
+    
+    pass.setPipeline(linePipeline); // Switch to the pipeline configured for drawing lines
+    pass.setIndexBuffer(lineIndexBuffer, 'uint32'); // Use the line index buffer
+    pass.drawIndexed(lineIndices.length); // Draw the lines based on the lineIndices
+    
     pass.end();
     device.queue.submit([encoder.finish()]);
   
